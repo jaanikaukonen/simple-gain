@@ -22,23 +22,47 @@ SimpleGainAudioProcessor::SimpleGainAudioProcessor()
                        ), treeState(*this, nullptr, "PARAMETERS", createParameterLayout())
 #endif
 {
+    treeState.addParameterListener("gain", this);
+    treeState.addParameterListener("phase", this);
+    treeState.addParameterListener("choice", this);
 }
 
 SimpleGainAudioProcessor::~SimpleGainAudioProcessor()
 {
+    treeState.removeParameterListener("gain", this);
+    treeState.removeParameterListener("phase", this);
+    treeState.removeParameterListener("choice", this);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout SimpleGainAudioProcessor::createParameterLayout()
 {
     std::vector <std::unique_ptr<juce::RangedAudioParameter>> params;
+    juce::StringArray choices = {"Compressor", "EQ", "Reverb"};
     
-    auto pGain = std::make_unique<juce::AudioParameterFloat>("gain", "Gain", -24.0, 24.0, 0.0);
-    auto pPhase = std::make_unique<juce::AudioParameterBool>("phase", "Phase", false);
+    auto pGain = std::make_unique<juce::AudioParameterFloat>(juce::ParameterID("gain", 1), "Gain", -24.0, 24.0, 0.0);
+    auto pPhase = std::make_unique<juce::AudioParameterBool>(juce::ParameterID("phase", 1), "Phase", false);
+    auto pChoice = std::make_unique<juce::AudioParameterChoice>(juce::ParameterID("choice", 1), "Choice", choices, 0);
     
     params.push_back(std::move(pGain));
     params.push_back(std::move(pPhase));
+    params.push_back(std::move(pChoice));
     
     return { params.begin(), params.end() };
+}
+
+void SimpleGainAudioProcessor::parameterChanged(const juce::String &parameterID, float newValue)
+{
+    if (parameterID == "gain")
+    {
+        rawGain = juce::Decibels::decibelsToGain(newValue);
+        DBG("Gain is: " << newValue);
+    }
+    
+    if (parameterID == "phase")
+    {
+        phase = newValue;
+        DBG("Phase is: " << newValue);
+    }
 }
 
 //==============================================================================
@@ -106,8 +130,8 @@ void SimpleGainAudioProcessor::changeProgramName (int index, const juce::String&
 //==============================================================================
 void SimpleGainAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    phase = *treeState.getRawParameterValue("phase");
+    rawGain = juce::Decibels::decibelsToGain(static_cast<float>(*treeState.getRawParameterValue("phase")));
 }
 
 void SimpleGainAudioProcessor::releaseResources()
@@ -151,9 +175,6 @@ void SimpleGainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
     
-    float dbGain = *treeState.getRawParameterValue("gain");
-    float rawGain = juce::Decibels::decibelsToGain(dbGain);
-    
     // Audio block object
     juce::dsp::AudioBlock<float> block (buffer);
     
@@ -164,7 +185,15 @@ void SimpleGainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         
         for (int sample = 0; sample < block.getNumSamples(); ++sample)
         {
-            channelData[sample] *= rawGain;
+            if (phase)
+            {
+                channelData[sample] *= rawGain * -1.0;
+            }
+            
+            else
+            {
+                channelData[sample] *= rawGain;
+            }
         }
     }
 }
@@ -184,15 +213,22 @@ juce::AudioProcessorEditor* SimpleGainAudioProcessor::createEditor()
 //==============================================================================
 void SimpleGainAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    // Save params
+    juce::MemoryOutputStream stream(destData, false);
+    treeState.state.writeToStream(stream);
 }
 
 void SimpleGainAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    // Recall params
+    auto tree = juce::ValueTree::readFromData(data, size_t(sizeInBytes));
+    
+    if (tree.isValid())
+    {
+        treeState.state = tree;
+        phase = *treeState.getRawParameterValue("phase");
+        rawGain = juce::Decibels::decibelsToGain(static_cast<float>(*treeState.getRawParameterValue("gain")));
+    }
 }
 
 //==============================================================================
