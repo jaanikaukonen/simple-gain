@@ -19,13 +19,26 @@ SimpleGainAudioProcessor::SimpleGainAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                       ), treeState(*this, nullptr, "PARAMETERS", createParameterLayout())
 #endif
 {
 }
 
 SimpleGainAudioProcessor::~SimpleGainAudioProcessor()
 {
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout SimpleGainAudioProcessor::createParameterLayout()
+{
+    std::vector <std::unique_ptr<juce::RangedAudioParameter>> params;
+    
+    auto pGain = std::make_unique<juce::AudioParameterFloat>("gain", "Gain", -24.0, 24.0, 0.0);
+    auto pPhase = std::make_unique<juce::AudioParameterBool>("phase", "Phase", false);
+    
+    params.push_back(std::move(pGain));
+    params.push_back(std::move(pPhase));
+    
+    return { params.begin(), params.end() };
 }
 
 //==============================================================================
@@ -137,14 +150,21 @@ void SimpleGainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
-
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    
+    float dbGain = *treeState.getRawParameterValue("gain");
+    float rawGain = juce::Decibels::decibelsToGain(dbGain);
+    
+    // Audio block object
+    juce::dsp::AudioBlock<float> block (buffer);
+    
+    // DSP block
+    for (int channel = 0; channel < block.getNumChannels(); ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        auto* channelData = block.getChannelPointer(channel);
+        
+        for (int sample = 0; sample < block.getNumSamples(); ++sample)
         {
-            channelData[sample] *= 2.0;
+            channelData[sample] *= rawGain;
         }
     }
 }
@@ -157,7 +177,8 @@ bool SimpleGainAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* SimpleGainAudioProcessor::createEditor()
 {
-    return new SimpleGainAudioProcessorEditor (*this);
+    //return new SimpleGainAudioProcessorEditor (*this);
+    return new juce::GenericAudioProcessorEditor (*this);
 }
 
 //==============================================================================
